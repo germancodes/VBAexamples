@@ -1,0 +1,703 @@
+Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+
+Public Function ImportData()
+
+Public dblLoan As Double
+Public strProcessorPL As String
+
+
+
+DoCmd.RunSavedImportExport "Import-ToWork"
+
+
+End Function
+
+Sub assignUWs()
+'/*/*/*/*/*
+'//CODE WRITTEN BY German Candelaria
+'/*/*/*/*/*
+Dim dbsUW As Database
+Dim adoRecSet As New ADODB.Recordset
+Dim adoRecSet2 As New ADODB.Recordset
+Dim adoRecSet3 As New ADODB.Recordset
+Dim adoRecSet4 As New ADODB.Recordset
+Dim adoRecSet5 As New ADODB.Recordset
+Dim connDB As New ADODB.Connection
+Dim strSQL, strDBName, strDB As String
+Dim ProcessorPL, loanID, processorUnit, assgdUW As String
+Dim i As Integer
+
+i = 0
+
+Set dbsUW = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+strDBName = "Pipeline.mdb"
+strDB = "\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb"
+'Connect to DB
+connDB.Open ConnectionString:="Provider = Microsoft.ACE.OLEDB.12.0; data source=" & strDB
+'Run SQL to pull 'Assigned items from table
+strSQL = "SELECT loanID, ProcessorLogon FROM tblAssignmentResult WHERE Status='Assigned' AND RunDate = Date() ORDER BY ID"
+adoRecSet.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+'adoRecSet.MoveFirst
+'Loop through all of the records
+Do Until adoRecSet.EOF = True
+    'Retrieve needed values from table
+    loanID = adoRecSet.Fields("loanID")
+    ProcessorPL = adoRecSet.Fields("ProcessorLogon")
+    'Run SQL to pull the unit number
+    strSQL = "SELECT Unit FROM tblAssesment WHERE ProcessorLogon='" & ProcessorPL & "'"
+    adoRecSet2.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    'Pull the unit if there is one
+    If Not adoRecSet2.EOF = True Then
+        adoRecSet2.MoveFirst
+        If IsNull(adoRecSet2.Fields("Unit").Value) Then
+            processorUnit = ""
+        Else
+            processorUnit = adoRecSet2.Fields("Unit")
+        End If
+    Else
+        processorUnit = ""
+    End If
+    'Close recordset
+    adoRecSet2.Close
+    Set adoRecSet2 = Nothing
+    'Run SQL to find a suitable underwriter
+    If processorUnit <> "" Then
+        strSQL = "SELECT TOP 1 UnderwriterLogon " & _
+                 "FROM tblUnderwriter " & _
+                 "WHERE (ProcessingUnit = '" & processorUnit & "' OR ProcessingUnit2 = '" & processorUnit & "') AND (InRotation = Yes)" & _
+                 "ORDER BY LastAssgdDate"
+        adoRecSet3.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        'If a suitable underwriter is found
+        If Not adoRecSet3.EOF = True Then
+            'adoRecSet3.MoveFirst
+            assgdUW = adoRecSet3.Fields("UnderwriterLogon")
+            'Run SQL to update the 'LastAssgdDate' for the assigned underwriter
+            strSQL = "UPDATE tblUnderwriter " & _
+                     "SET LastAssgdDate = Now() " & _
+                     "WHERE UnderwriterLogon = '" & assgdUW & "'"
+            adoRecSet4.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+            Set adoRecSet4 = Nothing
+            dbsUW.Execute strSQL
+            'Run SQL to populate the UW name
+            strSQL = "UPDATE tblAssignmentResult " & _
+                     "SET Status = 'CadenceReady', UnderwriterLogon = '" & assgdUW & "', Unit = '" & processorUnit & "' " & _
+                     "WHERE loanID = " & loanID
+            adoRecSet5.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+            Set adoRecSet5 = Nothing
+            dbsUW.Execute strSQL
+            'MsgBox (assgdUW & " -> " & loanID & " -> " & processorUnit)
+        'If no UW is found
+        Else
+            'Dummy SQL
+            strSQL = "UPDATE tblUnderwriter " & _
+                     "SET LastAssgdDate = Now() " & _
+                     "WHERE UnderwriterLogon = '" & "PLH3440" & "'"
+            adoRecSet4.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+            Set adoRecSet4 = Nothing
+            dbsUW.Execute strSQL
+            'Run SQL to populate the status
+            strSQL = "UPDATE tblAssignmentResult " & _
+                     "SET Status = 'CadenceReady', Unit = '" & processorUnit & "' " & _
+                     "WHERE loanID = " & loanID
+            adoRecSet5.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+            Set adoRecSet5 = Nothing
+            dbsUW.Execute strSQL
+        End If
+        adoRecSet3.Close
+        Set adoRecSet3 = Nothing
+    Else
+        'Dummy SQL
+        strSQL = "UPDATE tblUnderwriter " & _
+                 "SET LastAssgdDate = Now() " & _
+                 "WHERE UnderwriterLogon = '" & "PLH3440" & "'"
+        adoRecSet4.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet4 = Nothing
+        dbsUW.Execute strSQL
+        'Run SQL to populate the status
+        strSQL = "UPDATE tblAssignmentResult " & _
+                 "SET Status = 'CadenceReady'" & _
+                 "WHERE loanID = " & loanID
+        adoRecSet5.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet5 = Nothing
+        dbsUW.Execute strSQL
+    End If
+    'Move to the next record if necessary
+    If Not adoRecSet.EOF = True Then
+        adoRecSet.MoveNext
+    End If
+Loop
+
+dbsUW.Close
+adoRecSet.Close
+Set adoRecSet = Nothing
+connDB.Close
+Set connDB = Nothing
+
+End Sub
+
+Sub updateUWtbl()
+'/*/*/*/*/*
+'//CODE WRITTEN BY German Candelaria
+'/*/*/*/*/*
+'Access variables
+Dim dbsUW As Database
+Dim adoRecSet As New ADODB.Recordset
+Dim adoRecSet2 As New ADODB.Recordset
+Dim connDB As New ADODB.Connection
+Dim strSQL, strDBName, strDB As String
+'Excel variables
+Dim xlApp As Excel.Application
+Dim sourceBook As Workbook
+Dim workingSheet As Worksheet
+Set xlApp = CreateObject("Excel.Application")
+'My variables
+Dim intCount, x As Integer
+Dim strUWPL, strUWName, strUWLoanType, strUWCOE, strUWProcUnit, strUWProcUnit2, strUWSite, strUWInRot As String
+
+'Start DB
+Set dbsUW = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+strDBName = "Pipeline.mdb"
+strDB = "\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb"
+'Connect to DB
+connDB.Open ConnectionString:="Provider = Microsoft.ACE.OLEDB.12.0; data source=" & strDB
+'Set excel app to be invisible
+xlApp.Visible = False
+'Open the workbook and set 'workingSheet'
+Set sourceBook = xlApp.Workbooks.Open("\\fsbdata1\ihomprod\Candelaria\RPA\LoanAssg\UnderwriterTable.xlsx")
+Set workingSheet = sourceBook.Sheets("Sheet1")
+'Count the number of rows
+intCount = workingSheet.Range("A100000").End(xlUp).Row
+
+'LOOP ROW BY ROW TO UPDATE THE DB AS NEEDED OR TO INSERT
+'NEW VALUES
+For x = 2 To intCount
+    'Close Recordset
+    If x <> 2 Then adoRecSet.Close
+    'Obtain variables from excel table
+    strUWPL = workingSheet.Range("A" & x).Value
+    strUWName = workingSheet.Range("B" & x).Value
+    strUWLoanType = workingSheet.Range("C" & x).Value
+    strUWCOE = workingSheet.Range("D" & x).Value
+    strUWProcUnit = workingSheet.Range("E" & x).Value
+    strUWProcUnit2 = workingSheet.Range("F" & x).Value
+    strUWSite = workingSheet.Range("G" & x).Value
+    strUWInRot = workingSheet.Range("H" & x).Value
+    strSQL = "SELECT UnderwriterLogon FROM tblUnderwriter WHERE UnderwriterLogon='" & strUWPL & "'"
+    adoRecSet.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockOptimistic
+    'Check if a record was found with that PL in the DB
+    If Not adoRecSet.EOF = True Then
+        'Update the existing record
+        adoRecSet.MoveFirst
+        strSQL = "UPDATE tblUnderwriter " & _
+                 "SET LoanType = '" & strUWLoanType & "', COE = '" & strUWCOE & "', ProcessingUnit = '" & strUWProcUnit & "', ProcessingUnit2 = '" & strUWProcUnit2 & _
+                 "', Site = '" & strUWSite & "', InRotation = " & strUWInRot & " " & _
+                 "WHERE UnderwriterLogon = '" & strUWPL & "'"
+        dbsUW.Execute strSQL
+    Else
+        'Add a new record
+        strSQL = "INSERT INTO tblUnderwriter" & _
+                 "(UnderwriterLogon, UnderwriterName, LoanType, COE, ProcessingUnit, ProcessingUnit2, Site, InRotation, LastAssgdDate)" & _
+                 "VALUES ('" & strUWPL & "', '" & strUWName & "', '" & strUWLoanType & "', '" & strUWCOE & "', '" & strUWProcUnit & "', '" & strUWProcUnit2 & _
+                 "', '" & strUWSite & "', " & strUWInRot & ", Now() ) "
+        dbsUW.Execute strSQL
+    End If
+Next x
+
+'Close Access
+dbsUW.Close
+adoRecSet.Close
+Set adoRecSet = Nothing
+connDB.Close
+Set connDB = Nothing
+'Close Excel
+sourceBook.Close
+Set xlApp = Nothing
+Set workingSheet = Nothing
+Set sourceBook = Nothing
+'MsgBox ("Done")
+
+End Sub
+
+Sub overflowAssigner()
+'/*/*/*/*/*
+'//CODE WRITTEN BY German Candelaria
+'/*/*/*/*/*
+'Excel variables
+Dim xlApp As Excel.Application
+Dim sourceBook As Workbook
+Dim workingSheet As Worksheet
+Set xlApp = CreateObject("Excel.Application")
+'Access variables
+Dim dbsUW As Database
+Dim connDB As New ADODB.Connection
+Dim strSQL, strDBName, strDB As String
+Dim adoRecSet As New ADODB.Recordset
+Dim adoRecSet4 As New ADODB.Recordset
+'Start DB
+Set dbsUW = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+strDBName = "Pipeline.mdb"
+strDB = "\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb"
+'Connect to DB
+connDB.Open ConnectionString:="Provider = Microsoft.ACE.OLEDB.12.0; data source=" & strDB
+
+'Set excel app to be invisible
+xlApp.Visible = False
+'Open the workbook and set 'workingSheet'
+Set sourceBook = xlApp.Workbooks.Open("\\fsbdata1\ihomprod\Candelaria\RPA\LoanAssg\OverflowLoans.xlsx")
+Set workingSheet = sourceBook.Sheets("Overflow")
+
+intCount = workingSheet.Range("A100000").End(xlUp).Row
+
+For x = 2 To intCount
+    dblLoan = workingSheet.Range("A" & x).Value
+    strProcessorPL = workingSheet.Range("B" & x).Value
+    'Dummy SQL
+        strSQL = "UPDATE tblUnderwriter " & _
+                 "SET LastAssgdDate = Now() " & _
+                 "WHERE UnderwriterLogon = '" & "PLH3440" & "'"
+        adoRecSet4.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet4 = Nothing
+        dbsUW.Execute strSQL
+    'Call updateOverflow(dblLoan, strProcessorPL)
+    strSQL = "UPDATE tblAssignmentResult " & _
+             "SET ProcessorLogon = '" & strProcessorPL & "', Status = 'Assigned'" & _
+             "WHERE loanID = " & dblLoan & " AND RunDate = Date() AND Status = 'Overflow'"
+    adoRecSet.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    Set adoRecSet = Nothing
+    dbsUW.Execute strSQL
+Next x
+
+'Close Database
+connDB.Close
+Set connDB = Nothing
+'Close Excel
+sourceBook.Close
+Set sourceBook = Nothing
+'Assign UWs as necessary
+Call assignUWs
+MsgBox ("Overflow Assigner Done")
+End Sub
+
+------------------------------------------------
+
+Option Compare Database
+Option Explicit
+
+Private Sub AssessPipeline()
+
+Dim dbs As Database
+Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+
+'dbs.Execute "INSERT INTO tblAssesment (ProcessorName, NumberofLoans, loanLimit, DailyLimit ) SELECT DISTINCT ProcessorName,COUNT(loanID) AS NumberOfLoans, 10, 5 FROM Pipeline WHERE Status <> 'Pending' GROUP BY ProcessorName;"
+'dbs.Execute "INSERT INTO tblAssesment (ProcessorName) SELECT DISTINCT Pipeline.ProcessorName FROM Pipeline WHERE Pipeline.Status <> 'Pending' AND Pipeline.ProcessorName NOT IN (SELECT DISTINCT tblAssesment.ProcessorName FROM tblAssesment);"
+
+'dbs.Execute "INSERT INTO tblAssesment (ProcessorName, NumberofLoans, loanLimit, DailyLimit ) SELECT DISTINCT ProcessorName,COUNT(loanID) AS NumberOfLoans, 10, 5 FROM tblPipeline  GROUP BY ProcessorName;"
+dbs.Execute "UPDATE tblAssesment SET NumberofLoans =0"
+'dbs.Execute "UPDATE tblAssesment SET loanLimit = 100"
+'dbs.Execute "UPDATE tblAssesment SET DailyLimit = 8"
+dbs.Execute "UPDATE tblAssesment SET AssignToday =0"
+''dbs.Execute "UPDATE tblAssesment SET AssignToday =DailyLimit WHERE (loanLimit - NumberofLoans) >= DailyLimit"
+''dbs.Execute "UPDATE tblAssesment SET AssignToday =(loanLimit - NumberofLoans) WHERE (loanLimit - NumberofLoans) < DailyLimit"
+''dbs.Execute "UPDATE tblAssesment SET AssignToday =0 WHERE AssignToday<0"
+'dbs.Execute "UPDATE tblAssesment SET PTOInd =0"
+'dbs.Execute "UPDATE tblAssesment SET COEInd ='Jumbo, New Construction'"
+'dbs.Execute "UPDATE tblAssesment SET [Level] =0"
+dbs.Execute "UPDATE tblAssesment SET PercentageofAvailbility = 100-(NumberofLoans/loanLimit*100)"
+dbs.Execute "UPDATE tblAssesment SET PercentageofAvailbility = 100 WHERE NumberofLoans=0"
+'dbs.Execute "UPDATE tblAssesment SET Region='CA, TX'"
+'dbs.Execute "UPDATE tblAssesment SET LoanType='VA,CONV'"
+'dbs.Execute "UPDATE tblAssesment SET InRotation=0"
+
+dbs.Close
+
+
+End Sub
+
+Private Sub Form_Load()
+'Application.SetOption "Auto compact", True
+
+DoCmd.RunSavedImportExport "Import-Processor Table"
+Call updateUWtbl
+DoCmd.RunSavedImportExport "Import-LA1"
+DoCmd.RunSavedImportExport "Import-LA2"
+'DoCmd.RunSavedImportExport "Import-Processor Data"
+DoCmd.Close
+
+Call AssessPipeline
+Call countLoans
+Call loanFilter
+Call assignUWs
+
+MsgBox "Loan Assignment completed!"
+
+End Sub
+
+Sub countLoans()
+
+    Dim strMyPath As String, strDBName As String, strDB As String
+    Dim strSQL As String
+    Dim dblloanID As Double
+    Dim strProcessorName As String
+    Dim strProcessorLogon As String
+    Dim intNumberofLoans As Double
+    
+    'instantiate an ADO object using Dim with the New keyword:
+    Dim adoRecSet As New ADODB.Recordset
+    Dim adoRecSet1 As New ADODB.Recordset
+    Dim connDB As New ADODB.Connection
+    
+    strDBName = "Pipeline.mdb"
+    strDB = "\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb"
+       
+    'Connect to a data source:
+    'For pre - MS Access 2007, .mdb files (viz. MS Access 97 up to MS Access 2003), use the Jet provider: "Microsoft.Jet.OLEDB.4.0". For Access 2007 (.accdb database) use the ACE Provider: "Microsoft.ACE.OLEDB.12.0". The ACE Provider can be used for both the Access .mdb & .accdb files.
+    connDB.Open ConnectionString:="Provider = Microsoft.ACE.OLEDB.12.0; data source=" & strDB
+    
+    strSQL = "SELECT COUNT(Pipeline.loanID) AS NumberOfLoans, Pipeline.ProcessorLogon FROM Pipeline  INNER JOIN tblAssesment ON tblAssesment.ProcessorLogon = Pipeline.ProcessorLogon WHERE Pipeline.Status <> 'Pending' GROUP BY Pipeline.ProcessorLogon"
+
+    adoRecSet.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    
+    Dim dbs As Database
+    Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+    
+    adoRecSet.MoveFirst
+    Do Until adoRecSet.EOF = True
+        strSQL = "UPDATE tblAssesment SET NumberofLoans =" & adoRecSet.Fields(0) & " WHERE ProcessorLogon='" & adoRecSet.Fields(1) & "';"
+        'dbs.Execute strSQL
+        adoRecSet1.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet1 = Nothing
+           
+        adoRecSet.MoveNext
+    Loop
+    dbs.Close
+    
+    adoRecSet.Close
+    Set adoRecSet = Nothing
+    connDB.Close
+    Set connDB = Nothing
+
+End Sub
+
+Private Sub loanFilter()
+    'On Error GoTo ErrorHandler
+    
+    'instantiate an ADO object using Dim with the New keyword:
+    Dim adoRecSet As New ADODB.Recordset
+    Dim adoRecSet1 As New ADODB.Recordset
+    Dim adoRecSet2 As New ADODB.Recordset
+    Dim adoRecSet3 As New ADODB.Recordset
+    Dim adoRecSet4 As New ADODB.Recordset
+    Dim adoRecSet5 As New ADODB.Recordset
+    Dim adoRecSet6 As New ADODB.Recordset
+    Dim adoRecSet7 As New ADODB.Recordset
+    Dim adoRecSet8 As New ADODB.Recordset
+    Dim adoRecSet9 As New ADODB.Recordset
+    Dim adoRecSet10 As New ADODB.Recordset
+    Dim adoRecSet11 As New ADODB.Recordset
+    Dim adoRecSet12 As New ADODB.Recordset
+    Dim connDB As New ADODB.Connection
+   
+        
+    Dim strMyPath As String, strDBName As String, strDB As String
+    Dim strSQL As String
+    Dim dblloanID As Double
+    Dim strProcessorName As String
+    Dim strProcessorLogon As String
+    Dim intNumberofLoans As Double
+    Dim boolInvalidAssg, boolGoodAssg As Boolean
+    Dim intAssignToday, intDailyLimit, intNumofLoans, intLoanLimit As Integer
+    Dim dblPercAvail As Double
+    
+    strDBName = "Pipeline.mdb"
+    strDB = "\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb"
+    
+    'Connect to a data source:
+    'For pre - MS Access 2007, .mdb files (viz. MS Access 97 up to MS Access 2003), use the Jet provider: "Microsoft.Jet.OLEDB.4.0". For Access 2007 (.accdb database) use the ACE Provider: "Microsoft.ACE.OLEDB.12.0". The ACE Provider can be used for both the Access .mdb & .accdb files.
+    connDB.Open ConnectionString:="Provider = Microsoft.ACE.OLEDB.12.0; data source=" & strDB
+    
+    Dim dbs As Database
+    Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+
+    'adoRecSet.MoveFirst
+   ' Do Until adoRecSet.EOF = True
+    
+    'Update level as number for an easy comparison
+    strSQL = "UPDATE Pipeline INNER JOIN tblLevel ON Pipeline.Attribute = tblLevel.Attribute Set Pipeline.[Level] = tblLevel.[Level] WHERE Pipeline.Status = 'Pending'"
+    'dbs.Execute strSQL
+    adoRecSet11.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    Set adoRecSet11 = Nothing
+    strSQL = "UPDATE tblAssesment INNER JOIN tblLevel ON tblAssesment.Attribute = tblLevel.Attribute Set tblAssesment.[Level] = tblLevel.[Level]"
+    'dbs.Execute strSQL
+    adoRecSet12.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    Set adoRecSet12 = Nothing
+    dbs.Close
+
+    Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+    strSQL = "DELETE * FROM tblTemp"
+    adoRecSet10.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    Set adoRecSet10 = Nothing
+    'dbs.Execute strSQL
+    
+    'Stuff commented 11/17
+'    strSQL = "INSERT INTO tblTemp (ProcessorLogon, loanID, PTOInd, COEInd, [Level], PercentageofAvailbility, LastAssignDate, Region, LoanType, InRotation, Status) SELECT T.ProcessorLogon, P.loanID, T.PTOInd, T.COEInd, T.[Level], T.PercentageofAvailbility, T.LastAssignDate, T.Region, T.LoanType, T.InRotation, P.Status FROM tblAssesment AS T INNER JOIN Pipeline AS P ON (T.Region = P.Region) AND (T.COEInd = P.COE) WHERE T.PTOInd = 0 And T.InRotation <> 0 And T.PercentageofAvailbility > 0 And T.DailyLimit > T.AssignToday AND T.[Level]<=P.[Level] AND P.Status = 'Pending'  AND ( IIF(InStr(1, T.LoanType, ',')=0,T.LoanType,Trim(Mid(T.LoanType, 1, InStr(1, T.LoanType, ',') - 1))) = P.MortgageType OR IIF(InStr(1,T.LoanType, ',')=0,T.LoanType, Trim(Mid(T.LoanType, InStr(1, T.LoanType, ',') + 1, Len(T.LoanType)))) = P.MortgageType) ORDER BY T.[Level] DESC , T.PercentageofAvailbility DESC , T.LastAssignDate DESC"
+'    'MsgBox "strSQL=" & strSQL
+'    dbs.Execute strSQL
+    'Stuff commented 11/17 end
+    
+    dbs.Close
+    Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+    'adoRecSet.MoveNext
+    'Loop
+
+    Dim s As String
+    Dim n As Integer
+    
+    n = FreeFile()
+    Open "\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\TestLog.txt" For Output As #n
+
+    Dim i As Integer
+    i = 0
+    '----------------------------------------------------------------
+    Dim ProcessorLogon As String, loanID As Double
+    Dim ProcessorPL As String
+
+    'strSQL = "SELECT ID, ProcessorLogon, loanID FROM tblTemp"
+    'strSQL = "SELECT loanID,ProcessorLogon FROM Pipeline WHERE Status='Pending'"
+    strSQL = "SELECT t1.loanID, t1.ProcessorLogon, t1.Level " & _
+             "FROM Pipeline as t1 " & _
+             "WHERE Status='Pending' " & _
+             "ORDER BY t1.Level"
+
+    adoRecSet.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+    
+    adoRecSet.MoveFirst
+    Do Until adoRecSet.EOF = True
+    
+        loanID = adoRecSet.Fields("loanID")
+        'MsgBox loanID
+        
+        'update pipeline status & processorlog
+        'Started Removal /*/*/*/*/*/
+        'strSQL = "UPDATE Pipeline INNER JOIN tblTemp ON Pipeline.loanID = tblTemp.loanID SET Pipeline.ProcessorLogon = tblTemp.ProcessorLogon, Pipeline.Status = 'Assigned', Pipeline.RunDateTime = Now() WHERE  tblTemp.loanID =" & loanID & " AND Pipeline.Status = 'Pending'"
+        'dbs.Execute strSQL
+        'End Removal /*/*/*/*/*/*//*/
+        
+        'New stuff added 11/17
+        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+    
+        strSQL = "INSERT INTO tblTemp (ProcessorLogon, loanID, PTOInd, COEInd, [Level], PercentageofAvailbility, LastAssignDate, Region, LoanType, InRotation, Status) SELECT T.ProcessorLogon, P.loanID, T.PTOInd, T.COEInd, T.[Level], T.PercentageofAvailbility, T.LastAssignDate, T.Region, T.LoanType, T.InRotation, P.Status FROM tblAssesment AS T INNER JOIN Pipeline AS P ON (T.Region = P.Region) AND (T.COEInd = P.COE) WHERE T.PTOInd = 0 And T.InRotation <> 0 And T.PercentageofAvailbility > 0 And T.DailyLimit > T.AssignToday AND T.[Level]<=P.[Level] AND P.Status = 'Pending'  AND ( IIF(InStr(1, T.LoanType, ',')=0,T.LoanType,Trim(Mid(T.LoanType, 1, InStr(1, T.LoanType, ',') - 1))) = P.MortgageType OR IIF(InStr(1,T.LoanType, ',')=0,T.LoanType, Trim(Mid(T.LoanType, InStr(1, T.LoanType, ',') + 1, Len(T.LoanType)))) = P.MortgageType) ORDER BY T.[Level] DESC , T.PercentageofAvailbility DESC , T.LastAssignDate DESC"
+        adoRecSet1.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet1 = Nothing
+        'dbs.Execute strSQL
+        
+        dbs.Close
+        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+        'New stuff added 11/17 end
+        
+        '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        '//////////////////////New Stuff\\\\\\\\\\\\\\\\\\\\\\\\\\\
+        '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        strSQL = "SELECT ProcessorLogon " & _
+                 "FROM tblTemp " & _
+                 "WHERE loanID = " & loanID
+                 
+         adoRecSet2.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+         
+         ProcessorPL = ""
+         boolGoodAssg = False
+         
+         If Not adoRecSet2.EOF = True Then
+            'adoRecSet3.MoveFirst
+            ProcessorPL = adoRecSet2.Fields("ProcessorLogon")
+            'Assume assignment is invalid
+            boolInvalidAssg = True
+            'Loop while assignment is invalid
+            Do While (boolInvalidAssg)
+                'Additional query to ensure that selected processor is able to take loan
+                strSQL = "SELECT PercentageofAvailbility, AssignToday, DailyLimit, NumberofLoans, loanLimit " & _
+                         "FROM tblAssesment " & _
+                         "WHERE ProcessorLogon = '" & ProcessorPL & "'"
+                adoRecSet3.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+                intAssignToday = adoRecSet3.Fields("AssignToday")
+                intDailyLimit = adoRecSet3.Fields("DailyLimit")
+                intNumofLoans = adoRecSet3.Fields("NumberofLoans")
+                intLoanLimit = adoRecSet3.Fields("loanLimit")
+                dblPercAvail = adoRecSet3.Fields("PercentageofAvailbility")
+                'Check if selected processor is truly eligible to accept loan
+                If (dblPercAvail <= 0) Or (intAssignToday >= intDailyLimit) Or (intNumberofLoans >= intLoanLimit) Then
+                    boolInvalidAssg = True
+                    adoRecSet2.MoveNext
+                    If Not adoRecSet2.EOF = True Then
+                        ProcessorPL = adoRecSet2.Fields("ProcessorLogon")
+                    Else
+                        adoRecSet3.Close
+                        Set adoRecSet3 = Nothing
+                        Exit Do
+                    End If
+                Else
+                    boolInvalidAssg = False
+                End If
+                'Close record set
+                adoRecSet3.Close
+                Set adoRecSet3 = Nothing
+            Loop
+            'end of new stuff
+            adoRecSet2.Close
+            Set adoRecSet2 = Nothing
+            'Only do update if a valid processor was found
+            If boolInvalidAssg = False Then
+                strSQL = "UPDATE Pipeline " & _
+                         "SET Pipeline.ProcessorLogon = '" & ProcessorPL & "', Pipeline.Status = 'Assigned', Pipeline.RunDateTime = Now() " & _
+                         "WHERE  Pipeline.loanID =" & loanID & " AND Pipeline.Status = 'Pending'"
+                'dbs.Execute strSQL
+                adoRecSet4.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+                Set adoRecSet4 = Nothing
+                'dbs.Execute strSQL
+            End If
+         Else
+            adoRecSet2.Close
+            Set adoRecSet2 = Nothing
+         End If
+         
+        '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        '//////////////////////New Stuff END\\\\\\\\\\\\\\\\\\\\\\\
+        '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        
+        'update assessment table
+        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+        strSQL = "UPDATE tblAssesment INNER JOIN Pipeline ON tblAssesment.ProcessorLogon = Pipeline.ProcessorLogon SET tblAssesment.LastAssignDate = Pipeline.RunDateTime, tblAssesment.AssignToday = tblAssesment.AssignToday+1,tblAssesment.PercentageofAvailbility = 100-(tblAssesment.NumberofLoans/tblAssesment.loanLimit*100) WHERE Pipeline.loanID =" & loanID & " AND Pipeline.Status = 'Assigned'"
+        'dbs.Execute strSQL
+        adoRecSet5.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet5 = Nothing
+        'dbs.Execute strSQL
+        
+        dbs.Close
+        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+        
+        '+1 # of loans
+        'dbs.Execute "UPDATE tblAssesment SET NumberofLoans = NumberofLoans+AssignToday"
+        'dbs.Execute "UPDATE tblAssesment INNER JOIN Pipeline ON tblAssesment.ProcessorLogon = Pipeline.ProcessorLogon SET tblAssesment.NumberofLoans = tblAssesment.NumberofLoans + 1 WHERE Pipeline.loanID =" & loanID & " AND Pipeline.Status = 'Assigned'"
+        strSQL = "UPDATE tblAssesment INNER JOIN Pipeline ON tblAssesment.ProcessorLogon = Pipeline.ProcessorLogon SET tblAssesment.NumberofLoans = tblAssesment.NumberofLoans + 1 WHERE Pipeline.loanID =" & loanID & " AND Pipeline.Status = 'Assigned'"
+        adoRecSet6.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet6 = Nothing
+        'dbs.Execute strSQL
+        
+        'refreshing the availability
+'        dbs.Execute "UPDATE tblAssesment SET PercentageofAvailbility = 100-(NumberofLoans/loanLimit*100)"
+'        dbs.Execute "UPDATE tblAssesment SET PercentageofAvailbility = 100 WHERE NumberofLoans = 0"
+        strSQL = "UPDATE tblAssesment SET PercentageofAvailbility = 100-(NumberofLoans/loanLimit*100)"
+        adoRecSet7.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet7 = Nothing
+        'dbs.Execute strSQL
+        'Second availability refresh query
+        strSQL = "UPDATE tblAssesment SET PercentageofAvailbility = 100 WHERE NumberofLoans = 0"
+        adoRecSet8.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet8 = Nothing
+        'dbs.Execute strSQL
+        
+        dbs.Close
+        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+    
+        'updating log
+        s = "--" & Now & "-- LoanID in process: " & ProcessorPL & "   <-- " & loanID
+        Debug.Print s
+        Print #n, s
+    
+        'refreshing tblTemp
+        strSQL = "DELETE * FROM tblTemp"
+        'dbs.Execute strSQL
+        adoRecSet9.Open Source:=strSQL, ActiveConnection:=connDB, CursorType:=adOpenDynamic, LockType:=adLockBatchOptimistic
+        Set adoRecSet9 = Nothing
+        'dbs.Execute strSQL
+    
+        dbs.Close
+        'Stuff commented 11/17
+'        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+'
+'        strSQL = "INSERT INTO tblTemp (ProcessorLogon, loanID, PTOInd, COEInd, [Level], PercentageofAvailbility, LastAssignDate, Region, LoanType, InRotation, Status) SELECT T.ProcessorLogon, P.loanID, T.PTOInd, T.COEInd, T.[Level], T.PercentageofAvailbility, T.LastAssignDate, T.Region, T.LoanType, T.InRotation, P.Status FROM tblAssesment AS T INNER JOIN Pipeline AS P ON (T.Region = P.Region) AND (T.COEInd = P.COE) WHERE T.PTOInd = 0 And T.InRotation <> 0 And T.PercentageofAvailbility > 0 And T.DailyLimit > T.AssignToday AND T.[Level]<=P.[Level] AND P.Status = 'Pending'  AND ( IIF(InStr(1, T.LoanType, ',')=0,T.LoanType,Trim(Mid(T.LoanType, 1, InStr(1, T.LoanType, ',') - 1))) = P.MortgageType OR IIF(InStr(1,T.LoanType, ',')=0,T.LoanType, Trim(Mid(T.LoanType, InStr(1, T.LoanType, ',') + 1, Len(T.LoanType)))) = P.MortgageType) ORDER BY T.[Level] DESC , T.PercentageofAvailbility DESC , T.LastAssignDate DESC"
+'        dbs.Execute strSQL
+'
+'        dbs.Close
+'        Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+        'Stuff commented 11/17 END
+        
+        i = i + 1
+        s = "Running count : " & i & vbCrLf
+        Debug.Print s & vbCrLf
+        Print #n, s
+            
+        If Not adoRecSet.EOF = True Then
+            adoRecSet.MoveNext
+        End If
+    
+    Loop
+    
+    'Overflow update
+    Set dbs = OpenDatabase("\\eagle.usaa.com\usaa\fsb\ihomprod\Candelaria\RPA\SkillsBasedRouting\Pipeline.mdb")
+    strSQL = "UPDATE Pipeline SET Status = 'Overflow' WHERE Status = 'Pending'"
+    dbs.Execute strSQL
+   
+    'taking backup of affected records in pipeline
+    'dbs.Execute "DELETE * FROM tblAssignmentResult" ' for testing purpose
+    strSQL = "INSERT INTO tblAssignmentResult (ProcessorLogon, loanID, [Level], COE, Region, LoanType, AssignedDateTime, Status) SELECT ProcessorLogon, loanID, [Level], COE, Region, MortgageType, RunDateTime, Status FROM Pipeline WHERE Status = 'Assigned' OR Status = 'Overflow' ORDER BY Status"
+    dbs.Execute strSQL
+   
+    s = "Assignment completed for " & i & " loans" & vbCrLf
+    Debug.Print s & vbCrLf
+    Print #n, s
+    
+    Close #n
+    dbs.Close
+    adoRecSet.Close
+    Set adoRecSet = Nothing
+    connDB.Close
+    Set connDB = Nothing
+    
+'ErrorHandler:
+'    ' clean up
+'    If Err <> 0 Then
+'        MsgBox Err.Source & "-->" & Err.Description, , "Error"
+'    End If
+
+
+End Sub
+
+Public Function SplitString(str As String, strDelemeter As String, part As Integer)
+   
+    If part = 1 Then
+        SplitString = Trim(Mid(str, 1, InStr(1, str, strDelemeter) - 1))
+    Else
+        SplitString = Trim(Mid(str, InStr(1, str, strDelemeter) + 1, Len(str)))
+    End If
+   
+End Function
+
+Public Function Pause(NumberOfSeconds As Variant)
+    On Error GoTo Error_GoTo
+
+    Dim PauseTime As Variant
+    Dim Start As Variant
+    Dim Elapsed As Variant
+
+    PauseTime = NumberOfSeconds
+    Start = Timer
+    Elapsed = 0
+    Do While Timer < Start + PauseTime
+        Elapsed = Elapsed + 1
+        If Timer = 0 Then
+            ' Crossing midnight
+            PauseTime = PauseTime - Elapsed
+            Start = 0
+            Elapsed = 0
+        End If
+        DoEvents
+    Loop
+
+Exit_GoTo:
+    On Error GoTo 0
+    Exit Function
+Error_GoTo:
+    Debug.Print Err.Number, Err.Description, Erl
+    GoTo Exit_GoTo
+End Function
+
